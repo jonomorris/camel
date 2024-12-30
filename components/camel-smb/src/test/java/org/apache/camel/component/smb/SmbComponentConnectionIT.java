@@ -59,7 +59,7 @@ public class SmbComponentConnectionIT extends CamelTestSupport {
         MockEndpoint mock = getMockEndpoint("mock:received_send");
         mock.expectedMessageCount(1);
 
-        template.sendBodyAndHeader("seda:send", "Hello World", Exchange.FILE_NAME, "file_send.doc");
+        template.sendBodyAndHeader("direct:send", "Hello World", Exchange.FILE_NAME, "file_send.doc");
 
         mock.assertIsSatisfied();
         SmbFile file = mock.getExchanges().get(0).getIn().getBody(SmbFile.class);
@@ -73,12 +73,12 @@ public class SmbComponentConnectionIT extends CamelTestSupport {
         MockEndpoint mock = getMockEndpoint("mock:received_ignore");
         mock.expectedMessageCount(1);
 
-        template.sendBodyAndHeader("seda:send", "Hello World", Exchange.FILE_NAME, "file_ignore.doc");
-        template.sendBodyAndHeader("seda:send", "Good Bye", Exchange.FILE_NAME, "file_ignore.doc");
+        template.sendBodyAndHeader("direct:send", "Hello World", Exchange.FILE_NAME, "file_ignore.doc");
+        template.sendBodyAndHeader("direct:send", "Good Bye", Exchange.FILE_NAME, "file_ignore.doc");
 
         mock.assertIsSatisfied();
         SmbFile file = mock.getExchanges().get(0).getIn().getBody(SmbFile.class);
-        Assert.assertEquals("Hello World", new String(file.getInputStream().readAllBytes(), StandardCharsets.UTF_8));
+        Assert.assertEquals("Hello World", new String((byte[]) file.getBody(), StandardCharsets.UTF_8));
     }
 
     @Test
@@ -86,8 +86,8 @@ public class SmbComponentConnectionIT extends CamelTestSupport {
 
         MockEndpoint mock = getMockEndpoint("mock:received_override");
         mock.expectedMessageCount(1);
-        template.sendBodyAndHeader("seda:send", "Hello World22", Exchange.FILE_NAME, "file_override.doc");
-        template.sendBodyAndHeaders("seda:send", "Good Bye", Map.of(Exchange.FILE_NAME, "file_override.doc",
+        template.sendBodyAndHeader("direct:send", "Hello World22", Exchange.FILE_NAME, "file_override.doc");
+        template.sendBodyAndHeaders("direct:send", "Good Bye", Map.of(Exchange.FILE_NAME, "file_override.doc",
                 SmbConstants.SMB_FILE_EXISTS, GenericFileExist.Override.name()));
 
         mock.assertIsSatisfied();
@@ -123,7 +123,7 @@ public class SmbComponentConnectionIT extends CamelTestSupport {
                         .process(this::process)
                         .to("mock:result");
 
-                from("seda:send")
+                from("direct:send")
                         .toF("smb:%s/%s?username=%s&password=%s&path=/", service.address(), service.shareName(),
                                 service.userName(), service.password());
 
