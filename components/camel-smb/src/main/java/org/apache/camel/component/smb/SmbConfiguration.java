@@ -17,17 +17,14 @@
 package org.apache.camel.component.smb;
 
 import com.hierynomus.smbj.SmbConfig;
+import org.apache.camel.component.file.GenericFileConfiguration;
 import org.apache.camel.component.file.GenericFileExist;
-import org.apache.camel.spi.IdempotentRepository;
 import org.apache.camel.spi.Metadata;
 import org.apache.camel.spi.UriParam;
 import org.apache.camel.spi.UriParams;
-import org.apache.camel.support.processor.idempotent.MemoryIdempotentRepository;
 
 @UriParams
-public class SmbConfiguration {
-
-    protected static final int DEFAULT_IDEMPOTENT_CACHE_SIZE = 1000;
+public class SmbConfiguration extends GenericFileConfiguration {
 
     @UriParam(description = "The path, within the share, to consume the files from")
     private String path;
@@ -35,10 +32,6 @@ public class SmbConfiguration {
     @UriParam(label = "producer", description = "What action to take if the SMB file already exists",
               defaultValue = "Ignore", enums = "Override,Append,Fail,Ignore,Move,TryRename")
     private GenericFileExist fileExist;
-    @Metadata(defaultValue = "false")
-    @UriParam(label = "producer", description = "Whether to create parent directory if it does not exist",
-              defaultValue = "false")
-    private boolean autoCreate;
     @Metadata(defaultValue = "2048")
     @UriParam(label = "producer", description = "Read buffer size when for file being produced", defaultValue = "2048")
     private int readBufferSize;
@@ -57,18 +50,11 @@ public class SmbConfiguration {
     @UriParam(label = "advanced",
               description = "An optional SMB I/O bean to use to setup the file access attributes when reading/writing a file")
     private SmbIOBean smbIoBean = new SmbReadBean();
-    @UriParam(label = "advanced", description = "A pluggable repository org.apache.camel.spi.IdempotentRepository "
-                                                + "which by default use MemoryIdempotentRepository if none is specified.")
-    protected IdempotentRepository idempotentRepository
-            = MemoryIdempotentRepository.memoryIdempotentRepository(DEFAULT_IDEMPOTENT_CACHE_SIZE);
     @Metadata(autowired = true)
     @UriParam(label = "advanced",
               description = "An optional SMB client configuration, can be used to configure client specific "
                             + " configurations, like timeouts")
     private SmbConfig smbConfig;
-    @UriParam(label = "consumer", defaultValue = "false",
-              description = "If a directory, will look for files in all the sub-directories as well.")
-    protected boolean recursive;
 
     public String getUsername() {
         return username;
@@ -88,18 +74,6 @@ public class SmbConfiguration {
 
     public String getDomain() {
         return domain;
-    }
-
-    public boolean isRecursive() {
-        return recursive;
-    }
-
-    public void setRecursive(boolean recursive) {
-        this.recursive = recursive;
-    }
-
-    public void setRecursive(String recursiveString) {
-        this.recursive = Boolean.valueOf(recursiveString);
     }
 
     public boolean isDisconnect() {
@@ -128,6 +102,7 @@ public class SmbConfiguration {
 
     public void setPath(String path) {
         this.path = path;
+        super.setDirectory(path);
     }
 
     public String getSearchPattern() {
@@ -136,14 +111,6 @@ public class SmbConfiguration {
 
     public void setSearchPattern(String searchPattern) {
         this.searchPattern = searchPattern;
-    }
-
-    public IdempotentRepository getIdempotentRepository() {
-        return idempotentRepository;
-    }
-
-    public void setIdempotentRepository(IdempotentRepository idempotentRepository) {
-        this.idempotentRepository = idempotentRepository;
     }
 
     public SmbConfig getSmbConfig() {
@@ -160,18 +127,6 @@ public class SmbConfiguration {
 
     public void setFileExist(GenericFileExist fileExist) {
         this.fileExist = fileExist;
-    }
-
-    public boolean isAutoCreate() {
-        return autoCreate;
-    }
-
-    public void setAutoCreate(String autoCreate) {
-        this.autoCreate = Boolean.valueOf(autoCreate);
-    }
-
-    public void setAutoCreate(boolean autoCreate) {
-        this.autoCreate = autoCreate;
     }
 
     public void setReadBufferSize(int readBufferSize) {

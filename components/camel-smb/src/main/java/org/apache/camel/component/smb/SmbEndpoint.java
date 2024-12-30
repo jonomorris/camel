@@ -16,25 +16,47 @@
  */
 package org.apache.camel.component.smb;
 
+import java.io.File;
 import java.util.Map;
 
+import com.hierynomus.msfscc.fileinformation.FileIdBothDirectoryInformation;
 import org.apache.camel.Category;
-import org.apache.camel.Consumer;
+import org.apache.camel.Exchange;
+import org.apache.camel.FailedToCreateProducerException;
+import org.apache.camel.PollingConsumer;
 import org.apache.camel.Processor;
-import org.apache.camel.Producer;
+import org.apache.camel.component.file.GenericFile;
+import org.apache.camel.component.file.GenericFileConfiguration;
+import org.apache.camel.component.file.GenericFileConsumer;
+import org.apache.camel.component.file.GenericFileEndpoint;
+import org.apache.camel.component.file.GenericFileOperations;
+import org.apache.camel.component.file.GenericFilePollingConsumer;
+import org.apache.camel.component.file.GenericFileProcessStrategy;
+import org.apache.camel.component.file.GenericFileProducer;
+import org.apache.camel.component.smb.strategy.SmbProcessStrategyFactory;
 import org.apache.camel.spi.EndpointServiceLocation;
 import org.apache.camel.spi.Metadata;
 import org.apache.camel.spi.UriEndpoint;
 import org.apache.camel.spi.UriParam;
 import org.apache.camel.spi.UriPath;
-import org.apache.camel.support.ScheduledPollEndpoint;
+import org.apache.camel.support.processor.idempotent.MemoryIdempotentRepository;
+import org.apache.camel.util.FileUtil;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Receive files from SMB (Server Message Block) shares.
  */
 @UriEndpoint(firstVersion = "4.3.0", scheme = "smb", title = "SMB", syntax = "smb:hostname:port/shareName",
              category = { Category.FILE })
-public class SmbEndpoint extends ScheduledPollEndpoint implements EndpointServiceLocation {
+@Metadata(excludeProperties = "appendChars,readLockIdempotentReleaseAsync,readLockIdempotentReleaseAsyncPoolSize,"
+                              + "readLockIdempotentReleaseDelay,readLockIdempotentReleaseExecutorService,"
+                              + "directoryMustExist,extendedAttributes,probeContentType,startingDirectoryMustExist,"
+                              + "startingDirectoryMustHaveAccess,chmodDirectory,forceWrites,copyAndDeleteOnRenameFail,"
+                              + "renameUsingCopy,synchronous")
+public class SmbEndpoint extends GenericFileEndpoint<FileIdBothDirectoryInformation> implements EndpointServiceLocation {
+
+    private static final Logger LOG = LoggerFactory.getLogger(SmbEndpoint.class);
 
     @UriPath
     @Metadata(required = true)
@@ -77,24 +99,97 @@ public class SmbEndpoint extends ScheduledPollEndpoint implements EndpointServic
         return null;
     }
 
-    @Override
-    public Producer createProducer() {
-        return new SmbProducer(this);
+    public GenericFileOperations<FileIdBothDirectoryInformation> createOperations() {
+        SmbOperations operations = new SmbOperations(configuration.getSmbConfig());
+        operations.setEndpoint(this);
+        return operations;
     }
 
     @Override
-    public Consumer createConsumer(Processor processor) throws Exception {
-        Consumer consumer = new SmbConsumer(this, processor);
-        configureConsumer(consumer);
+    public String getScheme() {
+        return "smb";
+    }
+
+    @Override
+    public char getFileSeparator() {
+        return '/';
+    }
+
+    @Override
+    public boolean isAbsolute(String name) {
+        return FileUtil.isAbsolute(new File(name));
+    }
+
+    @Override
+    protected GenericFileProcessStrategy<FileIdBothDirectoryInformation> createGenericFileStrategy() {
+        return new SmbProcessStrategyFactory().createGenericFileProcessStrategy(getCamelContext(), getParamsAsMap());
+    }
+
+    @Override
+    public Exchange createExchange(GenericFile<FileIdBothDirectoryInformation> file) {
+        Exchange answer = super.createExchange();
+        if (file != null) {
+            file.bindToExchange(answer);
+        }
+        return answer;
+    }
+
+    @Override
+    public GenericFileProducer<FileIdBothDirectoryInformation> createProducer() throws Exception {
+        try {
+            return new SmbProducer(this, createOperations());
+        } catch (Exception e) {
+            throw new FailedToCreateProducerException(this, e);
+        }
+    }
+
+    @Override
+    public GenericFileConsumer<FileIdBothDirectoryInformation> createConsumer(Processor processor) {
+        // if noop=true then idempotent should also be configured
+        if (isNoop() && !isIdempotentSet()) {
+            LOG.info("Endpoint is configured with noop=true so forcing endpoint to be idempotent as well");
+            setIdempotent(true);
+        }
+
+        // if idempotent and no repository set then create a default one
+        if (isIdempotentSet() && Boolean.TRUE.equals(isIdempotent()) && idempotentRepository == null) {
+            LOG.info("Using default memory based idempotent repository with cache max size: {}", DEFAULT_IDEMPOTENT_CACHE_SIZE);
+            idempotentRepository = MemoryIdempotentRepository.memoryIdempotentRepository(DEFAULT_IDEMPOTENT_CACHE_SIZE);
+        }
+
+        SmbConsumer consumer = new SmbConsumer(
+                this, processor, createOperations(),
+                processStrategy != null ? processStrategy : createGenericFileStrategy());
+        consumer.setMaxMessagesPerPoll(this.getMaxMessagesPerPoll());
+        consumer.setEagerLimitMaxMessagesPerPoll(this.isEagerMaxMessagesPerPoll());
         return consumer;
     }
 
+    @Override
+    public PollingConsumer createPollingConsumer() throws Exception {
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("Creating GenericFilePollingConsumer with queueSize: {} blockWhenFull: {} blockTimeout: {}",
+                    getPollingConsumerQueueSize(), isPollingConsumerBlockWhenFull(),
+                    getPollingConsumerBlockTimeout());
+        }
+        GenericFilePollingConsumer result = new GenericFilePollingConsumer(this);
+        result.setBlockWhenFull(isPollingConsumerBlockWhenFull());
+        result.setBlockTimeout(getPollingConsumerBlockTimeout());
+        return result;
+    }
+
+    @Override
     public SmbConfiguration getConfiguration() {
         return configuration;
     }
 
-    public void setConfiguration(SmbConfiguration configuration) {
-        this.configuration = configuration;
+    @Override
+    public void setConfiguration(GenericFileConfiguration configuration) {
+        if (configuration == null) {
+            throw new IllegalArgumentException("SmbConfiguration expected");
+        }
+        this.configuration = (SmbConfiguration) configuration;
+        super.setConfiguration(configuration);
     }
 
     public String getHostname() {

@@ -17,55 +17,54 @@
 
 package org.apache.camel.component.smb;
 
-import java.io.IOException;
+import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 
+import com.hierynomus.msfscc.fileinformation.FileIdBothDirectoryInformation;
 import com.hierynomus.smbj.share.File;
 import org.apache.camel.Exchange;
-import org.apache.camel.WrappedFile;
+import org.apache.camel.component.file.GenericFile;
 
-public class SmbFile implements WrappedFile<File> {
+public class SmbFile extends GenericFile<FileIdBothDirectoryInformation> {
 
-    private final File file;
+    private final SmbOperations operations;
 
-    public SmbFile(File file) {
-        this.file = file;
+    public SmbFile(SmbOperations operations) {
+        this.operations = operations;
     }
 
     void populateHeaders(Exchange exchange) {
-        exchange.getMessage().setHeader(SmbConstants.SMB_FILE_PATH, file.getPath());
-        exchange.getMessage().setHeader(SmbConstants.SMB_UNC_PATH, file.getUncPath());
-
-        exchange.getMessage().setHeader(Exchange.FILE_NAME, file.getFileInformation().getNameInformation().toString());
+        exchange.getMessage().setHeader(SmbConstants.SMB_FILE_PATH, this.getPath());
+        exchange.getMessage().setHeader(SmbConstants.SMB_UNC_PATH, this.getUncPath());
+        exchange.getMessage().setHeader(Exchange.FILE_NAME, this.getFileName());
     }
 
     @Override
-    public File getFile() {
-        return file;
+    public FileIdBothDirectoryInformation getFile() {
+        return super.getFile();
     }
 
     public String getPath() {
-        return getFile().getPath();
+        return this.getAbsoluteFilePath();
     }
 
     public String getUncPath() {
-        return getFile().getUncPath();
+        try (File f = operations.getFile(this.getAbsoluteFilePath())) {
+            return f.getUncPath();
+        }
     }
 
     public InputStream getInputStream() {
-        return getFile().getInputStream();
+        // from body so that smb file handle can be closed
+        return new ByteArrayInputStream(operations.getBody(this.getAbsoluteFilePath()));
     }
 
     public long getSize() {
-        return file.getFileInformation().getStandardInformation().getEndOfFile();
+        return this.getFileLength();
     }
 
     @Override
     public Object getBody() {
-        try (InputStream is = file.getInputStream()) {
-            return is.readAllBytes();
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
+        return operations.getBody(this.getAbsoluteFilePath());
     }
 }

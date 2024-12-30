@@ -16,6 +16,7 @@
  */
 package org.apache.camel.component.smb;
 
+import org.apache.camel.Exchange;
 import org.apache.camel.spi.Metadata;
 
 public interface SmbConstants {
@@ -28,4 +29,7 @@ public interface SmbConstants {
 
     @Metadata(label = "consumer", description = "The UNC path of the file being processed within the share")
     String SMB_UNC_PATH = "CamelSmbUncPath";
+
+    @Metadata(description = "Path to the local work file, if local work directory is used.", javaType = "String")
+    String FILE_LOCAL_WORK_PATH = Exchange.FILE_LOCAL_WORK_PATH;
 }

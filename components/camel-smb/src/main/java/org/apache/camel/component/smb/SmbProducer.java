@@ -24,6 +24,7 @@ import java.util.HashSet;
 
 import com.hierynomus.msdtyp.AccessMask;
 import com.hierynomus.msfscc.FileAttributes;
+import com.hierynomus.msfscc.fileinformation.FileIdBothDirectoryInformation;
 import com.hierynomus.mssmb2.SMB2CreateDisposition;
 import com.hierynomus.mssmb2.SMB2CreateOptions;
 import com.hierynomus.mssmb2.SMB2ShareAccess;
@@ -34,10 +35,12 @@ import com.hierynomus.smbj.session.Session;
 import com.hierynomus.smbj.share.DiskShare;
 import com.hierynomus.smbj.share.File;
 import com.hierynomus.smbj.utils.SmbFiles;
+import org.apache.camel.AsyncCallback;
 import org.apache.camel.Exchange;
 import org.apache.camel.RuntimeCamelException;
 import org.apache.camel.component.file.GenericFileExist;
-import org.apache.camel.support.DefaultProducer;
+import org.apache.camel.component.file.GenericFileOperations;
+import org.apache.camel.component.file.GenericFileProducer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -46,7 +49,7 @@ import static org.apache.camel.util.ObjectHelper.isEmpty;
 /**
  * SMB file producer
  */
-public class SmbProducer extends DefaultProducer {
+public class SmbProducer extends GenericFileProducer<FileIdBothDirectoryInformation> {
     private static final Logger LOGGER = LoggerFactory.getLogger(SmbProducer.class);
 
     private boolean loggedIn;
@@ -60,8 +63,8 @@ public class SmbProducer extends DefaultProducer {
     HashSet<FileAttributes> FILE_ATTRIBUTES_NORMAL
             = new HashSet<FileAttributes>(Arrays.asList(FileAttributes.FILE_ATTRIBUTE_NORMAL));
 
-    protected SmbProducer(final SmbEndpoint endpoint) {
-        super(endpoint);
+    protected SmbProducer(final SmbEndpoint endpoint, GenericFileOperations<FileIdBothDirectoryInformation> operations) {
+        super(endpoint, operations);
     }
 
     @Override
@@ -130,16 +133,15 @@ public class SmbProducer extends DefaultProducer {
 
     public void createDirectory(DiskShare share, java.io.File file) {
         String parentDir = file.getParent();
-        SmbConfiguration configuration = getEndpoint().getConfiguration();
 
         boolean dirExists = share.folderExists(parentDir);
-        if (!dirExists && configuration.isAutoCreate()) {
-            SmbFiles files = new SmbFiles();
-            files.mkdirs(share, normalize(parentDir));
-        }
-
         if (!dirExists) {
-            throw new RuntimeCamelException("Directory " + parentDir + " does not exist on share " + share.toString());
+            if (getEndpoint().isAutoCreate()) {
+                SmbFiles files = new SmbFiles();
+                files.mkdirs(share, normalize(parentDir));
+            } else {
+                throw new RuntimeCamelException("Directory " + parentDir + " does not exist on share " + share.toString());
+            }
         }
     }
 
@@ -149,7 +151,7 @@ public class SmbProducer extends DefaultProducer {
             gfe = getEndpoint().getConfiguration().getFileExist();
         }
 
-        gfe = (gfe == null) ? GenericFileExist.Fail : gfe;
+        gfe = (gfe == null) ? GenericFileExist.Ignore : gfe;
 
         return gfe;
     }
@@ -169,101 +171,109 @@ public class SmbProducer extends DefaultProducer {
     }
 
     @Override
-    public void process(final Exchange exchange) {
-        String fileName = exchange.getIn().getHeader(Exchange.FILE_NAME, String.class);
-        if (fileName == null || fileName.isEmpty()) {
-            //without filename, the file can not be written
-            throw new RuntimeCamelException("Header " + Exchange.FILE_NAME + " is missing, cannot create");
-        }
-
-        SmbConfiguration configuration = getEndpoint().getConfiguration();
-        String path = (configuration.getPath() == null) ? "" : configuration.getPath();
-
+    public boolean process(final Exchange exchange, AsyncCallback callback) {
         try {
-            connectIfNecessary(exchange);
-
-            java.io.File file = new java.io.File(path, fileName);
-
-            DiskShare share = (DiskShare) session.connectShare(getEndpoint().getShareName());
-            createDirectory(share, file);
-
-            GenericFileExist gfe = determineFileExist(exchange);
-            File shareFile = null;
-
-            // File existence modes
-            switch (gfe) {
-                case Override:
-                    shareFile = share.openFile(file.getPath(),
-                            FILE_WRITE_DATA_ACCESSMASK,
-                            FILE_ATTRIBUTES_NORMAL,
-                            SMB2ShareAccess.ALL,
-                            SMB2CreateDisposition.FILE_OVERWRITE_IF,
-                            FILE_DIRECTORY_CREATE_OPTIONS);
-                    break;
-                case Append:
-                    shareFile = share.openFile(file.getPath(),
-                            FILE_WRITE_DATA_ACCESSMASK,
-                            FILE_ATTRIBUTES_NORMAL,
-                            SMB2ShareAccess.ALL,
-                            SMB2CreateDisposition.FILE_OPEN_IF,
-                            FILE_DIRECTORY_CREATE_OPTIONS);
-                    break;
-                case Ignore:
-                    if (share.fileExists(file.getPath())) {
-                        doIgnore(file.getPath());
-                        return;
-                    }
-                    break;
-                case Fail:
-                    if (share.fileExists(file.getPath())) {
-                        doFail(file.getPath());
-                    }
-                    break;
-                case Move:
-                    throw new UnsupportedOperationException("Move is not implemented for this producer at the moment");
-                case TryRename:
-                    throw new UnsupportedOperationException("TryRename is not implemented for this producer at the moment");
+            String fileName = exchange.getIn().getHeader(Exchange.FILE_NAME, String.class);
+            if (fileName == null || fileName.isEmpty()) {
+                //without filename, the file can not be written
+                throw new RuntimeCamelException("Header " + Exchange.FILE_NAME + " is missing, cannot create");
             }
 
-            if (shareFile == null) {
-                //open for writing
-                shareFile = share.openFile(file.getPath(),
-                        FILE_WRITE_DATA_ACCESSMASK,
-                        FILE_ATTRIBUTES_NORMAL,
-                        SMB2ShareAccess.ALL,
-                        SMB2CreateDisposition.FILE_CREATE,
-                        FILE_DIRECTORY_CREATE_OPTIONS);
-            }
+            SmbConfiguration configuration = getEndpoint().getConfiguration();
+            String path = (configuration.getPath() == null) ? "" : configuration.getPath();
 
-            InputStream is = (exchange.getMessage(InputStream.class) == null)
-                    ? exchange.getMessage().getBody(InputStream.class) : exchange.getMessage(InputStream.class);
-
-            // In order to provide append option, we need to use offset / write with shareFile rather
-            // than with outputstream
-            int buffer = getReadBufferSize();
-            long fileOffset = 0;
-
-            byte[] byteBuffer = new byte[buffer];
-            int length = 0;
-            while ((length = is.read(byteBuffer)) > 0) {
-                fileOffset = share.getFileInformation(file.getPath())
-                        .getStandardInformation().getEndOfFile();
-                shareFile.write(byteBuffer, fileOffset, 0, length);
-            }
-            shareFile.flush();
-            shareFile.close();
-
-        } catch (IOException ioe) {
-            throw new RuntimeCamelException(ioe);
-        }
-
-        if (configuration.isDisconnect()) {
             try {
-                disconnect();
-            } catch (Exception e) {
-                // ignore
+                connectIfNecessary(exchange);
+
+                java.io.File file = new java.io.File(path, fileName);
+
+                DiskShare share = (DiskShare) session.connectShare(getEndpoint().getShareName());
+                createDirectory(share, file);
+
+                GenericFileExist gfe = determineFileExist(exchange);
+                File shareFile = null;
+
+                // File existence modes
+                switch (gfe) {
+                    case Override:
+                        shareFile = share.openFile(file.getPath(),
+                                FILE_WRITE_DATA_ACCESSMASK,
+                                FILE_ATTRIBUTES_NORMAL,
+                                SMB2ShareAccess.ALL,
+                                SMB2CreateDisposition.FILE_OVERWRITE_IF,
+                                FILE_DIRECTORY_CREATE_OPTIONS);
+                        break;
+                    case Append:
+                        shareFile = share.openFile(file.getPath(),
+                                FILE_WRITE_DATA_ACCESSMASK,
+                                FILE_ATTRIBUTES_NORMAL,
+                                SMB2ShareAccess.ALL,
+                                SMB2CreateDisposition.FILE_OPEN_IF,
+                                FILE_DIRECTORY_CREATE_OPTIONS);
+                        break;
+                    case Ignore:
+                        if (share.fileExists(file.getPath())) {
+                            doIgnore(file.getPath());
+                            return true;
+                        }
+                        break;
+                    case Fail:
+                        if (share.fileExists(file.getPath())) {
+                            doFail(file.getPath());
+                        }
+                        break;
+                    case Move:
+                        throw new UnsupportedOperationException("Move is not implemented for this producer at the moment");
+                    case TryRename:
+                        throw new UnsupportedOperationException("TryRename is not implemented for this producer at the moment");
+                }
+
+                if (shareFile == null) {
+                    //open for writing
+                    shareFile = share.openFile(file.getPath(),
+                            FILE_WRITE_DATA_ACCESSMASK,
+                            FILE_ATTRIBUTES_NORMAL,
+                            SMB2ShareAccess.ALL,
+                            SMB2CreateDisposition.FILE_CREATE,
+                            FILE_DIRECTORY_CREATE_OPTIONS);
+                }
+
+                InputStream is = (exchange.getMessage(InputStream.class) == null)
+                        ? exchange.getMessage().getBody(InputStream.class) : exchange.getMessage(InputStream.class);
+
+                // In order to provide append option, we need to use offset / write with shareFile rather
+                // than with outputstream
+                int buffer = getReadBufferSize();
+                long fileOffset = 0;
+
+                byte[] byteBuffer = new byte[buffer];
+                int length = 0;
+                while ((length = is.read(byteBuffer)) > 0) {
+                    fileOffset = share.getFileInformation(file.getPath())
+                            .getStandardInformation().getEndOfFile();
+                    shareFile.write(byteBuffer, fileOffset, 0, length);
+                }
+                shareFile.flush();
+                shareFile.close();
+
+            } catch (IOException ioe) {
+                throw new RuntimeCamelException(ioe);
             }
+
+            if (configuration.isDisconnect()) {
+                try {
+                    disconnect();
+                } catch (Exception e) {
+                    // ignore
+                }
+            }
+
+        } catch (Exception e) {
+            exchange.setException(e);
+        } finally {
+            callback.done(true);
         }
+        return true;
     }
 
     @Override
