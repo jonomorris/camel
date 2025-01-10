@@ -16,6 +16,7 @@
  */
 package org.apache.camel.component.as2;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyPair;
@@ -25,9 +26,13 @@ import java.security.Security;
 import java.security.cert.Certificate;
 import java.security.cert.X509Certificate;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
+import java.util.zip.ZipInputStream;
 
 import org.apache.camel.CamelException;
+import org.apache.camel.Exchange;
 import org.apache.camel.Processor;
 import org.apache.camel.builder.RouteBuilder;
 import org.apache.camel.component.as2.api.AS2AsynchronousMDNManager;
@@ -44,10 +49,12 @@ import org.apache.camel.component.as2.api.AS2SignatureAlgorithm;
 import org.apache.camel.component.as2.api.entity.AS2DispositionModifier;
 import org.apache.camel.component.as2.api.entity.AS2DispositionType;
 import org.apache.camel.component.as2.api.entity.AS2MessageDispositionNotificationEntity;
+import org.apache.camel.component.as2.api.entity.ApplicationEDIFACTEntity;
 import org.apache.camel.component.as2.api.entity.ApplicationEntity;
 import org.apache.camel.component.as2.api.entity.ApplicationPkcs7MimeCompressedDataEntity;
 import org.apache.camel.component.as2.api.entity.ApplicationPkcs7MimeEnvelopedDataEntity;
 import org.apache.camel.component.as2.api.entity.ApplicationPkcs7SignatureEntity;
+import org.apache.camel.component.as2.api.entity.ApplicationXMLEntity;
 import org.apache.camel.component.as2.api.entity.DispositionMode;
 import org.apache.camel.component.as2.api.entity.DispositionNotificationMultipartReportEntity;
 import org.apache.camel.component.as2.api.entity.MimeEntity;
@@ -60,6 +67,7 @@ import org.apache.camel.component.as2.api.util.MicUtils.ReceivedContentMic;
 import org.apache.camel.component.as2.api.util.SigningUtils;
 import org.apache.camel.component.as2.internal.AS2ApiCollection;
 import org.apache.camel.component.as2.internal.AS2ClientManagerApiMethod;
+import org.apache.camel.component.mock.MockEndpoint;
 import org.apache.camel.http.common.HttpMessage;
 import org.apache.camel.test.AvailablePortFinder;
 import org.apache.commons.lang3.tuple.ImmutableTriple;
@@ -79,6 +87,7 @@ import org.apache.hc.core5.http.protocol.HttpCoreContext;
 import org.apache.hc.core5.http.protocol.HttpDateGenerator;
 import org.bouncycastle.cms.jcajce.ZlibExpanderProvider;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
+import org.bouncycastle.util.encoders.Base64;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -1097,6 +1106,12 @@ public class AS2ClientManagerIT extends AbstractAS2ITSupport {
 
     private Triple<HttpEntity, HttpRequest, HttpResponse> executeRequest2(Map<String, Object> headers) throws Exception {
         HttpEntity responseEntity = requestBodyAndHeaders("direct://SEND2", EDI_MESSAGE, headers);
+
+        return new ImmutableTriple<>(responseEntity, requestHandler.getRequest(), requestHandler.getResponse());
+    }
+
+    private Triple<HttpEntity, HttpRequest, HttpResponse> executeRequest3(Map<String, Object> headers) throws Exception {
+        HttpEntity responseEntity = requestBodyAndHeaders("direct://SEND3", EDI_MESSAGE, headers);
 
         return new ImmutableTriple<>(responseEntity, requestHandler.getRequest(), requestHandler.getResponse());
     }
