@@ -37,4 +37,16 @@
         <module>camel-as2-api</module>
     </modules>
 
+    <dependencies>
+        <dependency>
+            <groupId>org.apache.camel</groupId>
+            <artifactId>camel-zipfile</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.camel</groupId>
+            <artifactId>camel-base64</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
 </project>

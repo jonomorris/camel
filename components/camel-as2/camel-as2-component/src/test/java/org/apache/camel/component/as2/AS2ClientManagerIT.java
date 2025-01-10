@@ -16,6 +16,7 @@
  */
 package org.apache.camel.component.as2;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyPair;
@@ -25,9 +26,13 @@ import java.security.Security;
 import java.security.cert.Certificate;
 import java.security.cert.X509Certificate;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
+import java.util.zip.ZipInputStream;
 
 import org.apache.camel.CamelException;
+import org.apache.camel.Exchange;
 import org.apache.camel.Processor;
 import org.apache.camel.builder.RouteBuilder;
 import org.apache.camel.component.as2.api.AS2AsynchronousMDNManager;
@@ -44,10 +49,12 @@ import org.apache.camel.component.as2.api.AS2SignatureAlgorithm;
 import org.apache.camel.component.as2.api.entity.AS2DispositionModifier;
 import org.apache.camel.component.as2.api.entity.AS2DispositionType;
 import org.apache.camel.component.as2.api.entity.AS2MessageDispositionNotificationEntity;
+import org.apache.camel.component.as2.api.entity.ApplicationEDIFACTEntity;
 import org.apache.camel.component.as2.api.entity.ApplicationEntity;
 import org.apache.camel.component.as2.api.entity.ApplicationPkcs7MimeCompressedDataEntity;
 import org.apache.camel.component.as2.api.entity.ApplicationPkcs7MimeEnvelopedDataEntity;
 import org.apache.camel.component.as2.api.entity.ApplicationPkcs7SignatureEntity;
+import org.apache.camel.component.as2.api.entity.ApplicationXMLEntity;
 import org.apache.camel.component.as2.api.entity.DispositionMode;
 import org.apache.camel.component.as2.api.entity.DispositionNotificationMultipartReportEntity;
 import org.apache.camel.component.as2.api.entity.MimeEntity;
@@ -60,6 +67,7 @@ import org.apache.camel.component.as2.api.util.MicUtils.ReceivedContentMic;
 import org.apache.camel.component.as2.api.util.SigningUtils;
 import org.apache.camel.component.as2.internal.AS2ApiCollection;
 import org.apache.camel.component.as2.internal.AS2ClientManagerApiMethod;
+import org.apache.camel.component.mock.MockEndpoint;
 import org.apache.camel.http.common.HttpMessage;
 import org.apache.camel.test.AvailablePortFinder;
 import org.apache.commons.lang3.tuple.ImmutableTriple;
@@ -79,6 +87,7 @@ import org.apache.hc.core5.http.protocol.HttpCoreContext;
 import org.apache.hc.core5.http.protocol.HttpDateGenerator;
 import org.bouncycastle.cms.jcajce.ZlibExpanderProvider;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
+import org.bouncycastle.util.encoders.Base64;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -297,6 +306,136 @@ public class AS2ClientManagerIT extends AbstractAS2ITSupport {
         assertNull(HttpMessageUtils.getHeaderValue(response, AS2Header.MESSAGE_ID), "Missing message id");
 
         assertNull(responseEntity, "Response entity");
+    }
+
+    // plain edi message, message content is zipped and base64 encoded via route
+    @Test
+    public void plainZippedBase64EncodedMessageTest() throws Exception {
+        final Map<String, Object> headers = new HashMap<>();
+        // parameter type is String
+        headers.put("CamelAs2.requestUri", REQUEST_URI);
+        // parameter type is String
+        headers.put("CamelAs2.subject", SUBJECT);
+        // parameter type is String
+        headers.put("CamelAs2.from", FROM);
+        // parameter type is String
+        headers.put("CamelAs2.as2From", AS2_NAME);
+        // parameter type is String
+        headers.put("CamelAs2.as2To", AS2_NAME);
+        // parameter type is org.apache.camel.component.as2.api.AS2MessageStructure
+        headers.put("CamelAs2.as2MessageStructure", AS2MessageStructure.PLAIN);
+        // parameter type is org.apache.http.entity.ContentType
+        headers.put("CamelAs2.ediMessageContentType",
+                ContentType.create(AS2MediaType.APPLICATION_EDIFACT, StandardCharsets.US_ASCII.name()));
+        // parameter type is String
+        headers.put("CamelAs2.ediMessageTransferEncoding", EDI_MESSAGE_CONTENT_TRANSFER_ENCODING);
+        // parameter type is String
+        headers.put("CamelAs2.attachedFileName", "");
+
+        executeRequest3(headers);
+
+        MockEndpoint mockEndpoint = getMockEndpoint("mock:as2RcvMsgs");
+        mockEndpoint.expectedMinimumMessageCount(1);
+        mockEndpoint.setResultWaitTime(TimeUnit.MILLISECONDS.convert(30, TimeUnit.SECONDS));
+        mockEndpoint.assertIsSatisfied();
+
+        List<Exchange> exchanges = mockEndpoint.getExchanges();
+        assertNotNull(exchanges);
+
+        Exchange exchange = exchanges.get(0);
+        HttpCoreContext coreContext = exchange.getProperty(org.apache.camel.component.as2.internal.AS2Constants.AS2_INTERCHANGE, HttpCoreContext.class);
+        assertNotNull(coreContext, "context");
+        HttpRequest request = coreContext.getRequest();
+
+        HttpEntity entity = ((ClassicHttpRequest) request).getEntity();
+        String ediMessage = ((ApplicationEntity) entity).getEdiMessage();
+        ZipInputStream zis = new ZipInputStream(new ByteArrayInputStream(Base64.decode(ediMessage)));
+        zis.getNextEntry();
+        String msg = new String(zis.readAllBytes(), StandardCharsets.US_ASCII);
+
+        assertEquals(EDI_MESSAGE, msg);
+    }
+
+    // encrypted-compressed-signed edi message, message is zipped and base64 encoded via route
+    @Test
+    public void encryptedCompressedZippedBase64EncodedMessageTest() throws Exception {
+        final Map<String, Object> headers = new HashMap<>();
+        // parameter type is String
+        headers.put("CamelAs2.requestUri", REQUEST_URI);
+        // parameter type is String
+        headers.put("CamelAs2.subject", SUBJECT);
+        // parameter type is String
+        headers.put("CamelAs2.from", FROM);
+        // parameter type is String
+        headers.put("CamelAs2.as2From", AS2_NAME);
+        // parameter type is String
+        headers.put("CamelAs2.as2To", AS2_NAME);
+        // parameter type is org.apache.camel.component.as2.api.AS2MessageStructure
+        headers.put("CamelAs2.as2MessageStructure", AS2MessageStructure.ENCRYPTED_COMPRESSED_SIGNED);
+        // parameter type is org.apache.http.entity.ContentType
+        headers.put("CamelAs2.ediMessageContentType",
+                ContentType.create(AS2MediaType.APPLICATION_EDIFACT, StandardCharsets.US_ASCII));
+        // parameter type is String
+        headers.put("CamelAs2.ediMessageTransferEncoding", EDI_MESSAGE_CONTENT_TRANSFER_ENCODING);
+
+        // parameter type is org.apache.camel.component.as2.api.AS2SignatureAlgorithm
+        headers.put("CamelAs2.signingAlgorithm", AS2SignatureAlgorithm.SHA512WITHRSA);
+        // parameter type is org.apache.camel.component.as2.api.AS2EncryptionAlgorithm
+        // parameter type is java.security.cert.Certificate[]
+        headers.put("CamelAs2.signingCertificateChain", new Certificate[]{clientCert});
+        // parameter type is java.security.PrivateKey
+        headers.put("CamelAs2.signingPrivateKey", clientKeyPair.getPrivate());
+
+        // parameter type is org.apache.camel.component.as2.api.AS2EncryptionAlgorithm
+        headers.put("CamelAs2.encryptingAlgorithm", AS2EncryptionAlgorithm.AES128_CBC);
+        // parameter type is java.security.cert.Certificate[]
+        headers.put("CamelAs2.encryptingCertificateChain", new Certificate[] { clientCert });
+
+        // parameter type is org.apache.camel.component.as2.api.AS2CompressionAlgorithm
+        headers.put("CamelAs2.compressionAlgorithm", AS2CompressionAlgorithm.ZLIB);
+
+        // parameter type is String
+        headers.put("CamelAs2.dispositionNotificationTo", "mrAS2@example.com");
+        // parameter type is String[]
+        headers.put("CamelAs2.signedReceiptMicAlgorithms", SIGNED_RECEIPT_MIC_ALGORITHMS);
+        // parameter type is String
+        headers.put("CamelAs2.attachedFileName", "");
+
+        executeRequest3(headers);
+
+        MockEndpoint mockEndpoint = getMockEndpoint("mock:as2RcvMsgs");
+        mockEndpoint.expectedMinimumMessageCount(1);
+        mockEndpoint.setResultWaitTime(TimeUnit.MILLISECONDS.convert(30, TimeUnit.SECONDS));
+        mockEndpoint.assertIsSatisfied();
+
+        List<Exchange> exchanges = mockEndpoint.getExchanges();
+        assertNotNull(exchanges);
+
+        Exchange exchange = exchanges.get(0);
+        HttpCoreContext coreContext = exchange.getProperty(org.apache.camel.component.as2.internal.AS2Constants.AS2_INTERCHANGE, HttpCoreContext.class);
+        assertNotNull(coreContext, "context");
+        HttpRequest request = coreContext.getRequest();
+
+        HttpEntity entity = ((ClassicHttpRequest) request).getEntity();
+
+        // decrypt
+        MimeEntity envelopeEntity
+                = ((ApplicationPkcs7MimeEnvelopedDataEntity) entity).getEncryptedEntity(clientKeyPair.getPrivate());
+
+        // get message and ignore signature of multi-part message
+        MultipartSignedEntity signedEntity = (MultipartSignedEntity) envelopeEntity;
+        assertEquals(2, signedEntity.getPartCount());
+
+        // decompress
+        ApplicationPkcs7MimeCompressedDataEntity compressedDataEntity = (ApplicationPkcs7MimeCompressedDataEntity) signedEntity.getPart(0);
+        ApplicationEDIFACTEntity applicationEDIFACTEntity = (ApplicationEDIFACTEntity) compressedDataEntity.getCompressedEntity(new ZlibExpanderProvider());
+
+        String ediMessage = applicationEDIFACTEntity.getEdiMessage();
+        ZipInputStream zis = new ZipInputStream(new ByteArrayInputStream(Base64.decode(ediMessage)));
+        zis.getNextEntry();
+        String msg = new String(zis.readAllBytes(), StandardCharsets.US_ASCII);
+
+        assertEquals(EDI_MESSAGE, msg);
     }
 
     @Test
@@ -898,6 +1037,12 @@ public class AS2ClientManagerIT extends AbstractAS2ITSupport {
         return new ImmutableTriple<>(responseEntity, requestHandler.getRequest(), requestHandler.getResponse());
     }
 
+    private Triple<HttpEntity, HttpRequest, HttpResponse> executeRequest3(Map<String, Object> headers) throws Exception {
+        HttpEntity responseEntity = requestBodyAndHeaders("direct://SEND3", EDI_MESSAGE, headers);
+
+        return new ImmutableTriple<>(responseEntity, requestHandler.getRequest(), requestHandler.getResponse());
+    }
+
     @Override
     protected RouteBuilder createRouteBuilder() {
         return new RouteBuilder() {
@@ -909,6 +1054,13 @@ public class AS2ClientManagerIT extends AbstractAS2ITSupport {
                         String body = message.getBody(String.class);
                     }
                 };
+                from("direct://SEND3")
+                        .marshal().zipFile()
+                        .marshal().base64()
+                        .convertBodyTo(String.class, "US-ASCII")
+                        .to("as2://" + PATH_PREFIX + "/send?inBody=ediMessage&httpSocketTimeout=5m&httpConnectionTimeout=5m")
+                        .to("mock:as2RcvMsgs");
+
                 // test route for send
                 from("direct://SEND")
                         .to("as2://" + PATH_PREFIX + "/send?inBody=ediMessage&httpSocketTimeout=5m&httpConnectionTimeout=5m");
