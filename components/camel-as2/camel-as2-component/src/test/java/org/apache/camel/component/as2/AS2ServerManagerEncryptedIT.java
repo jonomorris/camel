@@ -120,7 +120,7 @@ public class AS2ServerManagerEncryptedIT extends AS2ServerManagerITBase {
         assertTrue(ediEntity.getContentType().startsWith(AS2MediaType.APPLICATION_EDIFACT),
                 "Unexpected content type for enveloped mime part");
         assertFalse(ediEntity.isMainBody(), "Enveloped mime type set as main body of request");
-        assertEquals(EDI_MESSAGE.replaceAll("[\n\r]", ""), ediEntity.getEdiMessage().replaceAll("[\n\r]", ""),
+        assertEquals(EDI_MESSAGE.replaceAll("[\n\r]", ""), ediEntity.getEdiContentAsString().replaceAll("[\n\r]", ""),
                 "Unexpected content for enveloped mime part");
 
         String rcvdMessage = message.getBody(String.class);

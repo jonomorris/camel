@@ -914,12 +914,10 @@ public final class EntityParser {
 
             inbuffer.setCharsetDecoder(charsetDecoder);
 
-            String ediMessageBodyPartContent = parseBodyPartText(inbuffer, is, boundary);
-            if (contentTransferEncoding != null) {
-                ediMessageBodyPartContent = EntityUtils.decode(ediMessageBodyPartContent, charset, contentTransferEncoding);
-            }
+            byte[] ediMessageBodyPartContentBytes
+                    = parseBodyPartBytes(inbuffer, is, boundary, ediMessageContentType, contentTransferEncoding);
 
-            return EntityUtils.createEDIEntity(ediMessageBodyPartContent,
+            return EntityUtils.createEDIEntity(ediMessageBodyPartContentBytes,
                     ediMessageContentType, contentTransferEncoding, false, filename);
         } catch (Exception e) {
             ParseException parseException = new ParseException("failed to parse EDI entity");
@@ -991,6 +989,7 @@ public final class EntityParser {
         CharsetDecoder previousDecoder = inbuffer.getCharsetDecoder();
 
         try {
+            // parse entity body as text and decode, e.g. from base64
             byte[] compressedContent = parseBodyPartBytes(inbuffer, is, boundary, contentType, contentTransferEncoding);
             return new ApplicationPkcs7MimeCompressedDataEntity(compressedContent, contentTransferEncoding, false);
         } catch (Exception e) {

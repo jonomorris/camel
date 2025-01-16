@@ -16,6 +16,7 @@
  */
 package org.apache.camel.component.as2;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyPairGenerator;
@@ -69,11 +70,20 @@ public class AS2ServerManagerIT extends AS2ServerManagerITBase {
     protected static final Logger LOG = LoggerFactory.getLogger(AS2ServerManagerIT.class);
 
     @Test
-    public void receivePlainEDIMessageTest() throws Exception {
+    public void ediTextPlainMessageTest() throws Exception {
+        receivePlainEDIMessageTest(EDI_MESSAGE);
+    }
+
+    @Test
+    public void ediStreamPlainMessageTest() throws Exception {
+        receivePlainEDIMessageTest(new ByteArrayInputStream(EDI_MESSAGE.getBytes(StandardCharsets.US_ASCII)));
+    }
+
+    public void receivePlainEDIMessageTest(Object msg) throws Exception {
         final AS2ClientConnection clientConnection = getAs2ClientConnection();
         AS2ClientManager clientManager = new AS2ClientManager(clientConnection);
 
-        clientManager.send(EDI_MESSAGE, REQUEST_URI, SUBJECT, FROM, AS2_NAME, AS2_NAME, AS2MessageStructure.PLAIN,
+        clientManager.send(msg, REQUEST_URI, SUBJECT, FROM, AS2_NAME, AS2_NAME, AS2MessageStructure.PLAIN,
                 ContentType.create(AS2MediaType.APPLICATION_EDIFACT, StandardCharsets.US_ASCII), null, null, null, null,
                 null, DISPOSITION_NOTIFICATION_TO, SIGNED_RECEIPT_MIC_ALGORITHMS, null, null, null, null);
 
@@ -121,7 +131,7 @@ public class AS2ServerManagerIT extends AS2ServerManagerITBase {
         assertTrue(ediEntity.getContentType().startsWith(AS2MediaType.APPLICATION_EDIFACT),
                 "Unexpected content type for entity");
         assertTrue(ediEntity.isMainBody(), "Entity not set as main body of request");
-        String rcvdMessage = ediEntity.getEdiMessage().replaceAll("\r", "");
+        String rcvdMessage = ediEntity.getEdiContentAsString().replaceAll("\r", "");
         assertEquals(EDI_MESSAGE, rcvdMessage, "EDI message does not match");
 
         String rcvdMessageFromBody = message.getBody(String.class);
@@ -139,12 +149,21 @@ public class AS2ServerManagerIT extends AS2ServerManagerITBase {
     }
 
     @Test
-    public void receiveMultipartSignedMessageTest() throws Exception {
+    public void ediTextMultipartSignedMessageTest() throws Exception {
+        receiveMultipartSignedMessageTest(EDI_MESSAGE);
+    }
+
+    @Test
+    public void ediStreamMultipartSignedMessageTest() throws Exception {
+        receiveMultipartSignedMessageTest(new ByteArrayInputStream(EDI_MESSAGE.getBytes(StandardCharsets.US_ASCII)));
+    }
+
+    public void receiveMultipartSignedMessageTest(Object msg) throws Exception {
 
         final AS2ClientConnection clientConnection = getAs2ClientConnection();
         AS2ClientManager clientManager = new AS2ClientManager(clientConnection);
 
-        clientManager.send(EDI_MESSAGE, REQUEST_URI, SUBJECT, FROM, AS2_NAME, AS2_NAME, AS2MessageStructure.SIGNED,
+        clientManager.send(msg, REQUEST_URI, SUBJECT, FROM, AS2_NAME, AS2_NAME, AS2MessageStructure.SIGNED,
                 ContentType.create(AS2MediaType.APPLICATION_EDIFACT, StandardCharsets.US_ASCII), null,
                 AS2SignatureAlgorithm.SHA256WITHRSA,
                 certList.toArray(new Certificate[0]), signingKP.getPrivate(), null, DISPOSITION_NOTIFICATION_TO,
@@ -384,13 +403,23 @@ public class AS2ServerManagerIT extends AS2ServerManagerITBase {
                 "Unexpected content for enveloped mime part");
     }
 
-    // Verify that the payload is compressed before being signed.
     @Test
-    public void receiveMultipartCompressedAndSignedMessageTest() throws Exception {
+    public void ediTextMMultipartCompressedSignedMessageTest() throws Exception {
+        receiveMultipartCompressedAndSignedMessageTest(EDI_MESSAGE);
+    }
+
+    @Test
+    public void ediStreamMultipartCompressedSignedMessageTest() throws Exception {
+        receiveMultipartCompressedAndSignedMessageTest(
+                new ByteArrayInputStream(EDI_MESSAGE.getBytes(StandardCharsets.US_ASCII)));
+    }
+
+    // Verify that the payload is compressed before being signed.
+    public void receiveMultipartCompressedAndSignedMessageTest(Object msg) throws Exception {
         final AS2ClientConnection clientConnection = getAs2ClientConnection();
         AS2ClientManager clientManager = new AS2ClientManager(clientConnection);
 
-        clientManager.send(EDI_MESSAGE, REQUEST_URI, SUBJECT, FROM, AS2_NAME, AS2_NAME, AS2MessageStructure.COMPRESSED_SIGNED,
+        clientManager.send(msg, REQUEST_URI, SUBJECT, FROM, AS2_NAME, AS2_NAME, AS2MessageStructure.COMPRESSED_SIGNED,
                 ContentType.create(AS2MediaType.APPLICATION_EDIFACT, StandardCharsets.US_ASCII), null,
                 AS2SignatureAlgorithm.SHA256WITHRSA,
                 certList.toArray(new Certificate[0]), signingKP.getPrivate(), AS2CompressionAlgorithm.ZLIB,
@@ -419,6 +448,93 @@ public class AS2ServerManagerIT extends AS2ServerManagerITBase {
         assertTrue(multipartSignedEntity.isMainBody(), "Entity not set as main body of request");
 
         verifyCompressedSignedEntity(multipartSignedEntity);
+    }
+
+    // base64 encoded stream input, compressed then signed
+    @Test
+    public void receiveBase64StreamMultipartCompressedSignedTest() throws Exception {
+        final AS2ClientConnection clientConnection = getAs2ClientConnection();
+        AS2ClientManager clientManager = new AS2ClientManager(clientConnection);
+
+        clientManager.send(new ByteArrayInputStream(EDI_MESSAGE.getBytes(StandardCharsets.US_ASCII)), REQUEST_URI, SUBJECT,
+                FROM, AS2_NAME, AS2_NAME, AS2MessageStructure.COMPRESSED_SIGNED,
+                ContentType.create(AS2MediaType.APPLICATION_EDIFACT, StandardCharsets.US_ASCII), "base64",
+                AS2SignatureAlgorithm.SHA256WITHRSA,
+                certList.toArray(new Certificate[0]), signingKP.getPrivate(), AS2CompressionAlgorithm.ZLIB,
+                DISPOSITION_NOTIFICATION_TO,
+                SIGNED_RECEIPT_MIC_ALGORITHMS, null, null, null, null);
+
+        MockEndpoint mockEndpoint = getMockEndpoint("mock:as2RcvMsgs");
+        verifyMock(mockEndpoint);
+
+        final List<Exchange> exchanges = mockEndpoint.getExchanges();
+        verifyExchanges(exchanges);
+
+        Exchange exchange = exchanges.get(0);
+
+        HttpCoreContext coreContext = exchange.getProperty(AS2Constants.AS2_INTERCHANGE, HttpCoreContext.class);
+        assertNotNull(coreContext, "context");
+
+        HttpRequest request = coreContext.getRequest();
+        verifyRequest(request);
+
+        assertTrue(request.getFirstHeader(AS2Header.CONTENT_TYPE).getValue().startsWith(AS2MediaType.MULTIPART_SIGNED),
+                "Unexpected content type for message");
+        assertTrue(request instanceof ClassicHttpRequest, "Request does not contain entity");
+        HttpEntity entity = ((ClassicHttpRequest) request).getEntity();
+        assertNotNull(entity, "Request does not contain entity");
+        assertTrue(entity instanceof MultipartSignedEntity, "Unexpected request entity type");
+        MultipartSignedEntity multipartSignedEntity = (MultipartSignedEntity) entity;
+        assertTrue(multipartSignedEntity.isMainBody(), "Entity not set as main body of request");
+
+        verifyCompressedSignedEntity(multipartSignedEntity);
+    }
+
+    // base64 encoded stream input, plain text
+    @Test
+    public void receiveBase64StreamInputMessageTest() throws Exception {
+        final AS2ClientConnection clientConnection = getAs2ClientConnection();
+        AS2ClientManager clientManager = new AS2ClientManager(clientConnection);
+
+        clientManager.send(new ByteArrayInputStream(EDI_MESSAGE.getBytes(StandardCharsets.US_ASCII)), REQUEST_URI, SUBJECT,
+                FROM, AS2_NAME, AS2_NAME, AS2MessageStructure.PLAIN,
+                ContentType.create(AS2MediaType.APPLICATION_EDIFACT, StandardCharsets.US_ASCII), "base64",
+                null, null, null, null, DISPOSITION_NOTIFICATION_TO,
+                SIGNED_RECEIPT_MIC_ALGORITHMS, null, null, null, null);
+
+        MockEndpoint mockEndpoint = getMockEndpoint("mock:as2RcvMsgs");
+        verifyMock(mockEndpoint);
+
+        final List<Exchange> exchanges = mockEndpoint.getExchanges();
+        verifyExchanges(exchanges);
+
+        Exchange exchange = exchanges.get(0);
+        Message message = exchange.getIn();
+        assertNotNull(message, "exchange message");
+
+        String rcvdMessageFromBody = message.getBody(String.class);
+        assertEquals(EDI_MESSAGE.replaceAll("[\n\r]", ""), rcvdMessageFromBody.replaceAll("[\n\r]", ""),
+                "EDI message does not match");
+
+        HttpCoreContext coreContext = exchange.getProperty(AS2Constants.AS2_INTERCHANGE, HttpCoreContext.class);
+        assertNotNull(coreContext, "context");
+
+        HttpRequest request = coreContext.getRequest();
+        verifyRequest(request);
+
+        assertTrue(request.getFirstHeader(AS2Header.CONTENT_TYPE).getValue().startsWith(AS2MediaType.APPLICATION_EDIFACT),
+                "Unexpected content type for message");
+        assertTrue(request instanceof ClassicHttpRequest, "Request does not contain entity");
+        HttpEntity entity = ((ClassicHttpRequest) request).getEntity();
+        assertNotNull(entity, "Request does not contain entity");
+
+        assertTrue(entity instanceof ApplicationEDIFACTEntity, "Unexpected request entity type");
+        ApplicationEDIFACTEntity ediEntity = (ApplicationEDIFACTEntity) entity;
+        assertTrue(ediEntity.getContentType().startsWith(AS2MediaType.APPLICATION_EDIFACT),
+                "Unexpected content type for entity");
+        assertTrue(ediEntity.isMainBody(), "Entity not set as main body of request");
+        String rcvdMessage = ediEntity.getEdiContentAsString().replaceAll("\r", "");
+        assertEquals(EDI_MESSAGE, rcvdMessage, "EDI message does not match");
     }
 
     @Test

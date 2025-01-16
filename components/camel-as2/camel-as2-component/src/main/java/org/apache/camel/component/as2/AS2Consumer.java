@@ -129,7 +129,7 @@ public class AS2Consumer extends AbstractApiConsumer<AS2ApiName, AS2Configuratio
             try {
                 HttpCoreContext coreContext = HttpCoreContext.adapt(context);
                 exchange.setProperty(AS2Constants.AS2_INTERCHANGE, coreContext);
-                exchange.getIn().setBody(ediEntity.getEdiMessage());
+                exchange.getIn().setBody(ediEntity.getEdiContentAsString());
                 // send message to next processor in the route
                 getProcessor().process(exchange);
             } finally {
