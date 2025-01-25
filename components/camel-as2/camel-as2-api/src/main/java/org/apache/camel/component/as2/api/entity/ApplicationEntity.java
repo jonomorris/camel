@@ -21,11 +21,15 @@ import java.io.OutputStream;
 import java.io.UnsupportedEncodingException;
 import java.nio.charset.StandardCharsets;
 
+import java.io.ByteArrayInputStream;
+
+import org.apache.camel.CamelException;
 import org.apache.camel.RuntimeCamelException;
 import org.apache.camel.component.as2.api.AS2Header;
 import org.apache.camel.component.as2.api.CanonicalOutputStream;
 import org.apache.camel.component.as2.api.util.EntityUtils;
 import org.apache.camel.util.ObjectHelper;
+import org.apache.commons.codec.binary.Base64OutputStream;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.hc.core5.http.ContentType;
 import org.apache.hc.core5.http.Header;
@@ -50,18 +54,47 @@ public abstract class ApplicationEntity extends MimeEntity {
         }
     }
 
-    public byte[] getEdiContent() {
-        return ediContent;
-    }
+    public Object getEdiMessage() {
 
-    public String getEdiContentAsString() {
-        try {
-            // uses 'US-ASCII' as default if none set
-            return new String(ediContent, getCharset());
-        } catch (UnsupportedEncodingException e) {
-            throw new RuntimeCamelException(e);
+        if (this.getContentEncoding() == null) {
+            try {
+                // uses 'US-ASCII' as default if none set
+                return new String(ediContent, getCharset());
+            } catch (UnsupportedEncodingException e) {
+                throw new RuntimeCamelException(e);
+            }
+        }
+
+        switch (this.getContentEncoding().toLowerCase()) {
+            case "base64":
+            case "binary":
+                return new ByteArrayInputStream(ediContent);
+            default:
+
+            // case "quoted-printable":
+            // case "7bit":
+            // case "8bit":
+                try {
+                    // uses 'US-ASCII' as default if none set
+                    return new String(ediContent, getCharset());
+                } catch (UnsupportedEncodingException e) {
+                    throw new RuntimeCamelException(e);
+                }
         }
     }
+
+//    public byte[] getEdiContent() {
+//        return ediContent;
+//    }
+//
+//    public String getEdiContentAsString() {
+//        try {
+//            // uses 'US-ASCII' as default if none set
+//            return new String(ediContent, getCharset());
+//        } catch (UnsupportedEncodingException e) {
+//            throw new RuntimeCamelException(e);
+//        }
+//    }
 
     @Override
     public void writeTo(OutputStream outstream) throws IOException {

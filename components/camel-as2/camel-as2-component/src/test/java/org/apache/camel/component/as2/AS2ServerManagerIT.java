@@ -35,13 +35,11 @@ import org.apache.camel.component.as2.api.AS2Header;
 import org.apache.camel.component.as2.api.AS2MediaType;
 import org.apache.camel.component.as2.api.AS2MessageStructure;
 import org.apache.camel.component.as2.api.AS2SignatureAlgorithm;
-import org.apache.camel.component.as2.api.entity.ApplicationEDIFACTEntity;
-import org.apache.camel.component.as2.api.entity.ApplicationPkcs7SignatureEntity;
-import org.apache.camel.component.as2.api.entity.ApplicationXMLEntity;
-import org.apache.camel.component.as2.api.entity.MultipartSignedEntity;
+import org.apache.camel.component.as2.api.entity.*;
 import org.apache.camel.component.as2.api.util.SigningUtils;
 import org.apache.camel.component.as2.internal.AS2Constants;
 import org.apache.camel.component.mock.MockEndpoint;
+import org.apache.commons.io.IOUtils;
 import org.apache.hc.core5.http.ClassicHttpRequest;
 import org.apache.hc.core5.http.ClassicHttpResponse;
 import org.apache.hc.core5.http.ContentType;
@@ -109,7 +107,7 @@ public class AS2ServerManagerIT extends AS2ServerManagerITBase {
         assertEquals(REQUEST_URI, request.getUri().getPath(), "Unexpected request URI value");
         assertEquals(HttpVersion.HTTP_1_1, request.getVersion(), "Unexpected HTTP version value");
         assertEquals(SUBJECT, request.getFirstHeader(AS2Header.SUBJECT).getValue(), "Unexpected subject value");
-        assertEquals(FROM, request.getFirstHeader(AS2Header.FROM).getValue(), "Unexpected from value");
+        assertEquals(FROM, request.getFirstHeader(AS2Header.FROM).getValue(), "Unexpe'cted from value");
         assertEquals(AS2_VERSION, request.getFirstHeader(AS2Header.AS2_VERSION).getValue(), "Unexpected AS2 version value");
         assertEquals(AS2_NAME, request.getFirstHeader(AS2Header.AS2_FROM).getValue(), "Unexpected AS2 from value");
         assertEquals(AS2_NAME, request.getFirstHeader(AS2Header.AS2_TO).getValue(), "Unexpected AS2 to value");
@@ -131,7 +129,11 @@ public class AS2ServerManagerIT extends AS2ServerManagerITBase {
         assertTrue(ediEntity.getContentType().startsWith(AS2MediaType.APPLICATION_EDIFACT),
                 "Unexpected content type for entity");
         assertTrue(ediEntity.isMainBody(), "Entity not set as main body of request");
-        String rcvdMessage = ediEntity.getEdiContentAsString().replaceAll("\r", "");
+
+        ApplicationEntity appEntity = (ApplicationEntity) entity;
+        assert(appEntity.getEdiMessage() instanceof String);
+
+        String rcvdMessage = ((String) appEntity.getEdiMessage()).replaceAll("\r", "");
         assertEquals(EDI_MESSAGE, rcvdMessage, "EDI message does not match");
 
         String rcvdMessageFromBody = message.getBody(String.class);
@@ -512,7 +514,10 @@ public class AS2ServerManagerIT extends AS2ServerManagerITBase {
         Message message = exchange.getIn();
         assertNotNull(message, "exchange message");
 
-        String rcvdMessageFromBody = message.getBody(String.class);
+//        String rcvdMessageFromBody = message.getBody(String.class);
+
+        String rcvdMessageFromBody = new String(IOUtils.toByteArray(message.getBody(java.io.InputStream.class)), StandardCharsets.US_ASCII);
+
         assertEquals(EDI_MESSAGE.replaceAll("[\n\r]", ""), rcvdMessageFromBody.replaceAll("[\n\r]", ""),
                 "EDI message does not match");
 
@@ -533,7 +538,11 @@ public class AS2ServerManagerIT extends AS2ServerManagerITBase {
         assertTrue(ediEntity.getContentType().startsWith(AS2MediaType.APPLICATION_EDIFACT),
                 "Unexpected content type for entity");
         assertTrue(ediEntity.isMainBody(), "Entity not set as main body of request");
-        String rcvdMessage = ediEntity.getEdiContentAsString().replaceAll("\r", "");
+
+        ApplicationEDIFACTEntity appEntity = (ApplicationEDIFACTEntity) entity;
+        assert(appEntity.getEdiMessage() instanceof String);
+
+        String rcvdMessage = ((String) appEntity.getEdiMessage()).replaceAll("\r", "");
         assertEquals(EDI_MESSAGE, rcvdMessage, "EDI message does not match");
     }
 

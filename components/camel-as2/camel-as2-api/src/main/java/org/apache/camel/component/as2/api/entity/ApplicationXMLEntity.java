@@ -17,9 +17,7 @@
 package org.apache.camel.component.as2.api.entity;
 
 import java.io.IOException;
-import java.io.UnsupportedEncodingException;
 
-import org.apache.camel.RuntimeCamelException;
 import org.apache.camel.component.as2.api.AS2MediaType;
 import org.apache.hc.core5.http.ContentType;
 

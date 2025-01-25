@@ -196,7 +196,8 @@ public class AS2MessageTestBase {
         if (aResponse.hasException()) {
             fail(aResponse.getException());
         }
-        assertEquals(EDI_MESSAGE, ediEntity.getEdiContentAsString().replaceAll("\r", ""));
+        assert(ediEntity.getEdiMessage() instanceof String);
+        assertEquals(EDI_MESSAGE, ((String) ediEntity.getEdiMessage()).replaceAll("\r", ""));
     }
 
     protected void compressionSignatureOrderTest(boolean encrypt, boolean compressBeforeSign) {
@@ -236,7 +237,8 @@ public class AS2MessageTestBase {
         if (aResponse.hasException()) {
             fail(aResponse.getException());
         }
-        assertEquals(EDI_MESSAGE, ediEntity.getEdiContentAsString().replaceAll("\r", ""));
+        assert(ediEntity.getEdiMessage() instanceof String);
+        assertEquals(EDI_MESSAGE,  ((String)ediEntity.getEdiMessage()).replaceAll("\r", ""));
     }
 
     protected AS2ClientManager createDefaultClientManager() throws IOException {

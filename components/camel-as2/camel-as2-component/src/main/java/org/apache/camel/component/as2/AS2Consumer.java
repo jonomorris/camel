@@ -50,7 +50,8 @@ import static java.util.Optional.ofNullable;
 /**
  * The AS2 consumer.
  *
- * Implementation detail. This AS2 consumer extends AbstractApiConsumer but its not scheduled polling based. Instead it
+ * Implementation detail. This AS2 consumer extends AbstractApiConsumer but its
+ * not scheduled polling based. Instead it
  * uses a HTTP listener to connect to AS2 server and listen for events.
  */
 public class AS2Consumer extends AbstractApiConsumer<AS2ApiName, AS2Configuration> implements HttpRequestHandler {
@@ -117,11 +118,10 @@ public class AS2Consumer extends AbstractApiConsumer<AS2ApiName, AS2Configuratio
                 apiProxy.handleMDNResponse(context, getEndpoint().getSubject(),
                         ofNullable(getEndpoint().getFrom()).orElse(getEndpoint().getConfiguration().getServer()));
             }
-            ApplicationEntity ediEntity
-                    = HttpMessageUtils.extractEdiPayload(request,
-                            new HttpMessageUtils.DecrpytingAndSigningInfo(
-                                    as2ServerConnection.getValidateSigningCertificateChain(),
-                                    as2ServerConnection.getDecryptingPrivateKey()));
+            ApplicationEntity ediEntity = HttpMessageUtils.extractEdiPayload(request,
+                    new HttpMessageUtils.DecrpytingAndSigningInfo(
+                            as2ServerConnection.getValidateSigningCertificateChain(),
+                            as2ServerConnection.getDecryptingPrivateKey()));
 
             // Set AS2 Interchange property and EDI message into body of input message.
             Exchange exchange = createExchange(false);
@@ -129,7 +129,7 @@ public class AS2Consumer extends AbstractApiConsumer<AS2ApiName, AS2Configuratio
             try {
                 HttpCoreContext coreContext = HttpCoreContext.adapt(context);
                 exchange.setProperty(AS2Constants.AS2_INTERCHANGE, coreContext);
-                exchange.getIn().setBody(ediEntity.getEdiContentAsString());
+                exchange.getIn().setBody(ediEntity.getEdiMessage());
                 // send message to next processor in the route
                 getProcessor().process(exchange);
             } finally {

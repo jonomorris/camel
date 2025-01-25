@@ -361,7 +361,9 @@ public class AS2MessageTest extends AS2MessageTestBase {
         assertTrue(ediEntity.getContentType().startsWith(AS2MediaType.APPLICATION_EDIFACT),
                 "Unexpected content type for enveloped mime part");
         assertFalse(ediEntity.isMainBody(), "Enveloped mime type set as main body of request");
-        assertEquals(EDI_MESSAGE.replaceAll("[\n\r]", ""), ediEntity.getEdiContentAsString().replaceAll("[\n\r]", ""),
+
+        assert(ediEntity.getEdiMessage() instanceof String);
+        assertEquals(EDI_MESSAGE.replaceAll("[\n\r]", ""), ((String)ediEntity.getEdiMessage()).replaceAll("[\n\r]", ""),
                 "Unexpected content for enveloped mime part");
     }
 
@@ -674,7 +676,10 @@ public class AS2MessageTest extends AS2MessageTestBase {
         assertTrue(ediEntity.getContentType().startsWith(AS2MediaType.APPLICATION_EDIFACT),
                 "Unexpected content type for compressed entity");
         assertFalse(ediEntity.isMainBody(), "Compressed entity set as main body of request");
-        assertEquals(EDI_MESSAGE.replaceAll("[\n\r]", ""), ediEntity.getEdiContentAsString().replaceAll("[\n\r]", ""),
+
+        assert(ediEntity.getEdiMessage() instanceof String);
+
+        assertEquals(EDI_MESSAGE.replaceAll("[\n\r]", ""), ((String)ediEntity.getEdiMessage()).replaceAll("[\n\r]", ""),
                 "Unexpected content for enveloped mime part");
     }
 
