@@ -16,6 +16,7 @@
  */
 package org.apache.camel.component.as2;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyPair;
@@ -32,7 +33,14 @@ import java.util.concurrent.TimeUnit;
 import org.apache.camel.Exchange;
 import org.apache.camel.Message;
 import org.apache.camel.builder.RouteBuilder;
-import org.apache.camel.component.as2.api.*;
+import org.apache.camel.component.as2.api.AS2AsyncMDNServerManager;
+import org.apache.camel.component.as2.api.AS2Header;
+import org.apache.camel.component.as2.api.AS2MediaType;
+import org.apache.camel.component.as2.api.AS2MessageStructure;
+import org.apache.camel.component.as2.api.AS2MimeType;
+import org.apache.camel.component.as2.api.AS2ServerConnection;
+import org.apache.camel.component.as2.api.AS2ServerManager;
+import org.apache.camel.component.as2.api.AS2SignatureAlgorithm;
 import org.apache.camel.component.as2.api.entity.AS2DispositionType;
 import org.apache.camel.component.as2.api.entity.AS2MessageDispositionNotificationEntity;
 import org.apache.camel.component.as2.api.entity.ApplicationPkcs7SignatureEntity;
@@ -40,16 +48,16 @@ import org.apache.camel.component.as2.api.entity.DispositionMode;
 import org.apache.camel.component.as2.api.entity.DispositionNotificationMultipartReportEntity;
 import org.apache.camel.component.as2.api.entity.MimeEntity;
 import org.apache.camel.component.as2.api.entity.MultipartSignedEntity;
+import org.apache.camel.component.as2.api.entity.TextPlainEntity;
+import org.apache.camel.component.as2.api.protocol.MdnCopyRequestInterceptor;
 import org.apache.camel.component.as2.api.util.HttpMessageUtils;
 import org.apache.camel.component.as2.api.util.MicUtils;
+import org.apache.camel.component.as2.internal.AS2Constants;
 import org.apache.camel.component.mock.MockEndpoint;
 import org.apache.camel.test.AvailablePortFinder;
-import org.apache.commons.lang3.tuple.ImmutableTriple;
-import org.apache.commons.lang3.tuple.Triple;
 import org.apache.hc.core5.http.ClassicHttpRequest;
 import org.apache.hc.core5.http.ClassicHttpResponse;
 import org.apache.hc.core5.http.ContentType;
-import org.apache.hc.core5.http.HttpEntity;
 import org.apache.hc.core5.http.HttpException;
 import org.apache.hc.core5.http.HttpRequest;
 import org.apache.hc.core5.http.HttpResponse;
@@ -62,6 +70,7 @@ import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -111,11 +120,7 @@ public class AS2AsyncMDNServerManagerIT extends AbstractAS2ITSupport {
 
     private static final String EDI_MESSAGE_CONTENT_TRANSFER_ENCODING = "7bit";
     private static final int PARTNER_TARGET_PORT = AvailablePortFinder.getNextAvailable();
-
     private static final int RECEIPT_SERVER_PORT = AvailablePortFinder.getNextAvailable();
-    private static final int RECEIPT_SERVER_PORT2 = AvailablePortFinder.getNextAvailable();
-    private static final int RECEIPT_SERVER_PORT3 = AvailablePortFinder.getNextAvailable();
-    private static final int RECEIPT_SERVER_PORT4 = AvailablePortFinder.getNextAvailable();
 
     private static AS2ServerConnection serverConnection;
     private static RequestHandler requestHandler;
@@ -158,7 +163,7 @@ public class AS2AsyncMDNServerManagerIT extends AbstractAS2ITSupport {
     @Test
     public void deliveryPathMultipartReportTest() throws Exception {
         DispositionNotificationMultipartReportEntity reportEntity
-                = executeRequestWithAsyncResponsePath("direct://SEND3", "mock:as2RcvRcptMsgs3");
+                = executeRequestWithAsyncResponsePath("direct://SEND2", "mock:as2RcvRcptMsgs");
         verifyMultiPartReportParts(reportEntity);
         verifyMultiPartReportEntity(reportEntity);
     }
@@ -167,9 +172,16 @@ public class AS2AsyncMDNServerManagerIT extends AbstractAS2ITSupport {
     // 'Receipt-Delivery-Option' header specifying the return-URL.
     @Test
     public void deliveryHeaderMultipartSignedEntityTest() throws Exception {
-        MultipartSignedEntity responseSignedEntity
-                = executeRequestWithSignedAsyncResponseHeader("direct://SEND", RECEIPT_SERVER_PORT2, "mock:as2RcvRcptMsgs2");
+        Exchange exchange
+                = executeRequestWithSignedAsyncResponseHeader("direct://SEND", RECEIPT_SERVER_PORT, "mock:as2RcvRcptMsgs");
 
+        Message message = exchange.getIn();
+        assertNotNull(message);
+        assertInstanceOf(MultipartSignedEntity.class, message.getBody());
+
+        verifyRawMdnBody(exchange);
+
+        MultipartSignedEntity responseSignedEntity = (MultipartSignedEntity) message.getBody();
         MimeEntity responseSignedDataEntity = responseSignedEntity.getSignedDataEntity();
         assertTrue(responseSignedDataEntity instanceof DispositionNotificationMultipartReportEntity,
                 "Signed entity wrong type");
@@ -181,16 +193,22 @@ public class AS2AsyncMDNServerManagerIT extends AbstractAS2ITSupport {
 
         ApplicationPkcs7SignatureEntity signatureEntity = responseSignedEntity.getSignatureEntity();
         assertNotNull(signatureEntity, "Signature Entity");
-        verifyMdnSignature(reportEntity);
+        verifyMdnMic(reportEntity);
     }
 
     // Verify the signed MDN receipt returned asynchronously from the server when the endpoint uri includes the
     // 'Receipt-Delivery-Option' path variable specifying the return-URL.
     @Test
     public void deliveryPathMultipartSignedEntityTest() throws Exception {
-        MultipartSignedEntity responseSignedEntity
-                = executeRequestWithSignedAsyncResponsePath("direct://SEND4", "mock:as2RcvRcptMsgs4");
+        Exchange exchange = executeRequestWithSignedAsyncResponsePath("direct://SEND2", "mock:as2RcvRcptMsgs");
 
+        Message message = exchange.getIn();
+        assertNotNull(message);
+        assertInstanceOf(MultipartSignedEntity.class, message.getBody());
+
+        verifyRawMdnBody(exchange);
+
+        MultipartSignedEntity responseSignedEntity = (MultipartSignedEntity) message.getBody();
         MimeEntity responseSignedDataEntity = responseSignedEntity.getSignedDataEntity();
         assertTrue(responseSignedDataEntity instanceof DispositionNotificationMultipartReportEntity,
                 "Signed entity wrong type");
@@ -202,7 +220,7 @@ public class AS2AsyncMDNServerManagerIT extends AbstractAS2ITSupport {
 
         ApplicationPkcs7SignatureEntity signatureEntity = responseSignedEntity.getSignatureEntity();
         assertNotNull(signatureEntity, "Signature Entity");
-        verifyMdnSignature(reportEntity);
+        verifyMdnMic(reportEntity);
     }
 
     private void verifyMultiPartReportParts(DispositionNotificationMultipartReportEntity reportEntity) {
@@ -242,7 +260,7 @@ public class AS2AsyncMDNServerManagerIT extends AbstractAS2ITSupport {
                 "Unexpected value for disposition type");
     }
 
-    private void verifyMdnSignature(DispositionNotificationMultipartReportEntity reportEntity) throws HttpException {
+    private void verifyMdnMic(DispositionNotificationMultipartReportEntity reportEntity) throws HttpException {
         AS2MessageDispositionNotificationEntity messageDispositionNotificationEntity
                 = (AS2MessageDispositionNotificationEntity) reportEntity.getPart(1);
 
@@ -264,21 +282,51 @@ public class AS2AsyncMDNServerManagerIT extends AbstractAS2ITSupport {
 
         return (DispositionNotificationMultipartReportEntity) message.getBody();
     }
+    
+    // Verify that the raw HTTP body of the asynchronous MDN receipt is available in the exchange properties
+    // for use in signature verification if required, and that the raw body contains the content of the multipart
+    // report entity parts
+    private void verifyRawMdnBody(Exchange exchange) throws IOException {
 
-    private MultipartSignedEntity verifySignedAsyncResponse(String mock) throws Exception {
-        Exchange exchange = receiveFromMock(mock);
-        Message message = exchange.getIn();
-        assertNotNull(message);
-        assertTrue(message.getBody() instanceof MultipartSignedEntity);
+        Object interchange = exchange.getProperty(AS2Constants.AS2_INTERCHANGE);
+        assertNotNull(interchange);
+        assertInstanceOf(HttpContext.class, interchange);
 
-        return (MultipartSignedEntity) message.getBody();
+        Object rawBody = ((HttpContext) interchange).getAttribute(MdnCopyRequestInterceptor.CAMEL_AS2_RAW_MDN_BODY);
+        assertNotNull(rawBody);
+        assertInstanceOf(byte[].class, rawBody);
+        String rawMdnBody = new String((byte[]) rawBody, StandardCharsets.US_ASCII);
+
+        // verify the raw MDN body contains the content of the multipart report entity parts
+        MultipartSignedEntity mse = (MultipartSignedEntity) exchange.getIn().getBody();
+
+        MimeEntity sde = mse.getSignedDataEntity();
+        assertNotNull(sde);
+        assertInstanceOf(DispositionNotificationMultipartReportEntity.class, sde);
+
+        DispositionNotificationMultipartReportEntity mre = (DispositionNotificationMultipartReportEntity) sde;
+        String contentType = mre.getContentType();
+        assertTrue(rawMdnBody.contains(contentType));
+
+        assertEquals(2, mre.getPartCount());
+        MimeEntity part1 = mre.getPart(0);
+        assertInstanceOf(TextPlainEntity.class, part1);
+
+        TextPlainEntity tpe = (TextPlainEntity) part1;
+        assertTrue(rawMdnBody.contains(tpe.getText()));
+
+        MimeEntity part2 = mre.getPart(1);
+        ByteArrayOutputStream bos = new ByteArrayOutputStream();
+        part2.writeTo(bos);
+        assertTrue(rawMdnBody.contains(bos.toString()));
     }
 
     // Request asynchronous receipt by including a 'receiptDeliveryOption' header specifying the return url.
     private DispositionNotificationMultipartReportEntity executeRequestWithAsyncResponseHeader(
             String endpointUri, int port, String mock)
             throws Exception {
-        executeRequestAsyncHeader(endpointUri, getAS2HeadersForAsyncReceipt("http://localhost:" + port + "/handle-receipts"));
+        requestBodyAndHeaders(endpointUri, EDI_MESSAGE,
+                getAS2HeadersForAsyncReceipt("http://localhost:" + port + "/handle-receipts"));
 
         return verifyAsyncResponse(mock);
     }
@@ -287,34 +335,33 @@ public class AS2AsyncMDNServerManagerIT extends AbstractAS2ITSupport {
     // specifying the return url.
     private DispositionNotificationMultipartReportEntity executeRequestWithAsyncResponsePath(String endpointUri, String mock)
             throws Exception {
-        executeRequestAsyncPath(endpointUri, getAS2Headers());
+        requestBodyAndHeaders(endpointUri, EDI_MESSAGE, getAS2Headers());
 
         return verifyAsyncResponse(mock);
     }
 
     // Request signed asynchronous receipt by including a 'receiptDeliveryOption' header specifying the return url,
     // and a 'signedReceiptMicAlgorithms' header specifying the signing algorithms.
-    private MultipartSignedEntity executeRequestWithSignedAsyncResponseHeader(String endpointUri, int port, String mock)
+    private Exchange executeRequestWithSignedAsyncResponseHeader(String endpointUri, int port, String mock)
             throws Exception {
         Map<String, Object> headers = getAS2HeadersForAsyncReceipt("http://localhost:" + port + "/handle-receipts");
         addSignedMessageHeaders(headers);
         // In order to receive signed MDN receipts the client must include both the 'signed-receipt-protocol' and
         // the 'signed-receipt-micalg' option parameters.
-        executeRequestAsyncHeader(endpointUri, headers);
+        requestBodyAndHeaders(endpointUri, EDI_MESSAGE, headers);
 
-        return verifySignedAsyncResponse(mock);
+        return receiveFromMock(mock);
     }
 
     // Request a signed asynchronous receipt by including a 'receiptDeliveryOption' path parameter in the endpoint uri
     // specifying the return url, and a 'signedReceiptMicAlgorithms' header specifying the signing algorithms.
-    private MultipartSignedEntity executeRequestWithSignedAsyncResponsePath(String endpointUri, String mock) throws Exception {
+    private Exchange executeRequestWithSignedAsyncResponsePath(String endpointUri, String mock) throws Exception {
         Map<String, Object> headers = getAS2Headers();
         addSignedMessageHeaders(headers);
         // In order to receive signed MDN receipts the client must include both the 'signed-receipt-protocol' and
         // the 'signed-receipt-micalg' option parameters.
-        executeRequestAsyncPath(endpointUri, headers);
-
-        return verifySignedAsyncResponse(mock);
+        requestBodyAndHeaders(endpointUri, EDI_MESSAGE, headers);
+        return receiveFromMock(mock);
     }
 
     private void addSignedMessageHeaders(Map<String, Object> headers) {
@@ -362,22 +409,6 @@ public class AS2AsyncMDNServerManagerIT extends AbstractAS2ITSupport {
         return exchanges.get(0);
     }
 
-    private Triple<HttpEntity, HttpRequest, HttpResponse> executeRequestAsyncHeader(
-            String endpointUri, Map<String, Object> headers)
-            throws Exception {
-        HttpEntity responseEntity = requestBodyAndHeaders(endpointUri, EDI_MESSAGE, headers);
-
-        return new ImmutableTriple<>(responseEntity, requestHandler.getRequest(), requestHandler.getResponse());
-    }
-
-    private Triple<HttpEntity, HttpRequest, HttpResponse> executeRequestAsyncPath(
-            String endpointUri, Map<String, Object> headers)
-            throws Exception {
-        HttpEntity responseEntity = requestBodyAndHeaders(endpointUri, EDI_MESSAGE, headers);
-
-        return new ImmutableTriple<>(responseEntity, requestHandler.getRequest(), requestHandler.getResponse());
-    }
-
     @Override
     protected RouteBuilder createRouteBuilder() {
         return new RouteBuilder() {
@@ -388,30 +419,14 @@ public class AS2AsyncMDNServerManagerIT extends AbstractAS2ITSupport {
                         .to("as2://client/send?inBody=ediMessage&httpSocketTimeout=5m&httpConnectionTimeout=5m");
 
                 // with option for asynchronous receipt specified as path-param
-                from("direct://SEND3")
+                from("direct://SEND2")
                         .toF("as2://client/send?inBody=ediMessage&httpSocketTimeout=5m&httpConnectionTimeout=5m"
-                             + "&receiptDeliveryOption=%s", "http://localhost:" + RECEIPT_SERVER_PORT3 + "/handle-receipts");
-
-                from("direct://SEND4")
-                        .toF("as2://client/send?inBody=ediMessage&httpSocketTimeout=5m&httpConnectionTimeout=5m"
-                             + "&receiptDeliveryOption=%s", "http://localhost:" + RECEIPT_SERVER_PORT4 + "/handle-receipts");
+                             + "&receiptDeliveryOption=%s", "http://localhost:" + RECEIPT_SERVER_PORT + "/handle-receipts");
 
                 // asynchronous AS2-MDN (receipt) server instance
                 fromF("as2://receipt/receive?requestUriPattern=/handle-receipts&asyncMdnPortNumber=%s",
                         RECEIPT_SERVER_PORT)
                         .to("mock:as2RcvRcptMsgs");
-
-                fromF("as2://receipt/receive?requestUriPattern=/handle-receipts&asyncMdnPortNumber=%s",
-                        RECEIPT_SERVER_PORT2)
-                        .to("mock:as2RcvRcptMsgs2");
-
-                fromF("as2://receipt/receive?requestUriPattern=/handle-receipts&asyncMdnPortNumber=%s",
-                        RECEIPT_SERVER_PORT3)
-                        .to("mock:as2RcvRcptMsgs3");
-
-                fromF("as2://receipt/receive?requestUriPattern=/handle-receipts&asyncMdnPortNumber=%s",
-                        RECEIPT_SERVER_PORT4)
-                        .to("mock:as2RcvRcptMsgs4");
             }
         };
     }

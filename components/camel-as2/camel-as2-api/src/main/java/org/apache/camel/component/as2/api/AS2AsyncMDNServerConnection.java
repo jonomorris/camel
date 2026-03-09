@@ -30,6 +30,7 @@ import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLServerSocketFactory;
 
 import org.apache.camel.component.as2.api.io.AS2BHttpServerConnection;
+import org.apache.camel.component.as2.api.protocol.MdnCopyRequestInterceptor;
 import org.apache.camel.util.ObjectHelper;
 import org.apache.hc.core5.http.ClassicHttpRequest;
 import org.apache.hc.core5.http.HttpException;
@@ -126,7 +127,8 @@ public class AS2AsyncMDNServerConnection {
                 SSLServerSocketFactory factory = sslContext.getServerSocketFactory();
                 serverSocket = factory.createServerSocket(port);
             }
-            HttpProcessor httpProcessor = new DefaultHttpProcessor(new RequestValidateHost());
+            HttpProcessor httpProcessor = new DefaultHttpProcessor(
+                    new RequestValidateHost(), new MdnCopyRequestInterceptor());
             // Create initial empty router
             currentHandler = createHandler();
             // Set up the HTTP service with delegating handler
