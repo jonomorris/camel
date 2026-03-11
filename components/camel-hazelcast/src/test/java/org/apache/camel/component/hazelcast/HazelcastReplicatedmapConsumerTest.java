@@ -29,6 +29,7 @@ import org.apache.camel.test.junit6.CamelTestSupport;
 import org.awaitility.Awaitility;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 
@@ -52,6 +53,12 @@ public class HazelcastReplicatedmapConsumerTest extends CamelTestSupport {
         if (hazelcastInstance != null) {
             hazelcastInstance.shutdown();
         }
+    }
+
+    @BeforeEach
+    public void resetState() {
+        map.clear();
+        MockEndpoint.resetMocks(context);
     }
 
     @Override
